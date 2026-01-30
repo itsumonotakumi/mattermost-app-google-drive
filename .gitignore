@@ -62,4 +62,5 @@ Thumbs.db
 
 # Go
 server/dist/
+server/server
 *.tar.gz
