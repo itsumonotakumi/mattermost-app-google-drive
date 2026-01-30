@@ -1,75 +1,86 @@
+GO ?= go
 NPM ?= npm
+CURL ?= curl
+MANIFEST_FILE ?= plugin.json
+BUNDLE_NAME ?= com.mattermost.google-drive
 
-define GetFromPkg
-$(shell node -p "require('./src/manifest.json').$(1)")
-endef
+# Build version from plugin.json
+PLUGIN_VERSION := $(shell node -p "require('./plugin.json').version")
 
-APP_ID      := $(call GetFromPkg, app_id)
-VERSION     := $(call GetFromPkg, version)
-BUNDLE_NAME := app_$(APP_ID)_$(VERSION)
-
+# Plugin bundle output
 DIST_DIR := dist
-DEFAULT_BUNDLE_NAME := bundle
+BUNDLE_FILE := $(DIST_DIR)/$(BUNDLE_NAME)-$(PLUGIN_VERSION).tar.gz
 
-# should be the same as the one in tsconfig.json
-TS_DIST_DIR := dist-ts
+# Go parameters
+GO_BUILD_FLAGS := -ldflags '-s -w'
+SERVER_DIR := server
 
-.PHONY: build dist watch clean help
+# Supported platforms
+PLATFORMS := linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64
 
-## build: build the app
-build: node_modules
-	$(NPM) run build
+.PHONY: all build build-server dist clean help check-style test
 
-## dist: creates the bundle file for dev deployment
-dist-dev: build
-	rm -rf $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME) && mkdir -p $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)	
-	mv $(TS_DIST_DIR)/* $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	rm -r $(TS_DIST_DIR)
-	mv node_modules $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	cp -r src/locales $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	cp src/manifest.json $(DIST_DIR)
-	cp -r static $(DIST_DIR)
-	cd $(DIST_DIR) ; \
-		zip -rm $(DEFAULT_BUNDLE_NAME).zip $(DEFAULT_BUNDLE_NAME) ; \
-		zip -rm ../$(BUNDLE_NAME).zip manifest.json static $(DEFAULT_BUNDLE_NAME).zip
-	rm -rf ./$(DIST_DIR)/* && mv ./$(BUNDLE_NAME).zip ./$(DIST_DIR)	
+## all: builds the plugin for all platforms
+all: dist
 
-## dist: creates the bundle file for deployment
-dist: build
-	rm -rf ./$(DIST_DIR)/* && mkdir -p ./$(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	mv $(TS_DIST_DIR)/* $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	rm -r $(TS_DIST_DIR)
-	mv node_modules $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	cp -r src/locales $(DIST_DIR)/$(DEFAULT_BUNDLE_NAME)
-	cp src/manifest.json $(DIST_DIR)
-	cp -r static $(DIST_DIR)
-	cd $(DIST_DIR) ; \
-		zip -rm $(DEFAULT_BUNDLE_NAME).zip $(DEFAULT_BUNDLE_NAME) ; \
-		zip -rm ../$(DEFAULT_BUNDLE_NAME).zip manifest.json static $(DEFAULT_BUNDLE_NAME).zip
-	rm -rf ./$(DIST_DIR)/* && mv ./$(DEFAULT_BUNDLE_NAME).zip ./$(DIST_DIR)	
+## build: builds the plugin server for the current platform
+build: build-server
 
-## build: build the app when changed
-watch: node_modules
-	$(NPM) run dev
+## build-server: builds the Go server component
+build-server:
+	cd $(SERVER_DIR) && $(GO) mod tidy
+	cd $(SERVER_DIR) && $(GO) build $(GO_BUILD_FLAGS) -o dist/plugin-$(shell $(GO) env GOOS)-$(shell $(GO) env GOARCH) .
 
-run:
-	docker-compose up
+## build-all-platforms: builds for all supported platforms
+build-all-platforms:
+	@mkdir -p $(SERVER_DIR)/dist
+	cd $(SERVER_DIR) && GOOS=linux GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o dist/plugin-linux-amd64 .
+	cd $(SERVER_DIR) && GOOS=linux GOARCH=arm64 $(GO) build $(GO_BUILD_FLAGS) -o dist/plugin-linux-arm64 .
+	cd $(SERVER_DIR) && GOOS=darwin GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o dist/plugin-darwin-amd64 .
+	cd $(SERVER_DIR) && GOOS=darwin GOARCH=arm64 $(GO) build $(GO_BUILD_FLAGS) -o dist/plugin-darwin-arm64 .
+	cd $(SERVER_DIR) && GOOS=windows GOARCH=amd64 $(GO) build $(GO_BUILD_FLAGS) -o dist/plugin-windows-amd64.exe .
 
-stop: 
-	docker-compose stop
+## dist: creates the plugin bundle
+dist: build-all-platforms
+	@mkdir -p $(DIST_DIR)
+	@rm -rf $(DIST_DIR)/plugin
+	@mkdir -p $(DIST_DIR)/plugin/server/dist
+	@mkdir -p $(DIST_DIR)/plugin/assets
+	@cp plugin.json $(DIST_DIR)/plugin/
+	@cp -r $(SERVER_DIR)/dist/* $(DIST_DIR)/plugin/server/dist/
+	@cp assets/icon.svg $(DIST_DIR)/plugin/assets/ 2>/dev/null || echo "Warning: icon.svg not found, skipping"
+	cd $(DIST_DIR)/plugin && tar -czvf ../$(BUNDLE_NAME)-$(PLUGIN_VERSION).tar.gz .
+	@rm -rf $(DIST_DIR)/plugin
+	@echo "Plugin bundle created: $(BUNDLE_FILE)"
 
-restart: 
-	docker-compose stop && docker-compose up
+## check-style: runs Go linting
+check-style:
+	cd $(SERVER_DIR) && $(GO) vet ./...
 
-## clean: deletes all
+## test: runs Go tests
+test:
+	cd $(SERVER_DIR) && $(GO) test -v ./...
+
+## clean: removes build artifacts
 clean:
-	$(NPM) run clean
+	rm -rf $(DIST_DIR)
+	rm -rf $(SERVER_DIR)/dist
 
-## node_modules: ensures NPM dependencies are installed without having to run this all the time
-node_modules: $(wildcard package.json)
-	$(NPM) install
-	touch $@
+## deploy: deploys the plugin to a local Mattermost instance (requires MM_SERVICESETTINGS_SITEURL and MM_ADMIN_TOKEN)
+deploy: dist
+ifndef MM_SERVICESETTINGS_SITEURL
+	$(error MM_SERVICESETTINGS_SITEURL is not set)
+endif
+ifndef MM_ADMIN_TOKEN
+	$(error MM_ADMIN_TOKEN is not set)
+endif
+	$(CURL) -i -X POST \
+		$(MM_SERVICESETTINGS_SITEURL)/api/v4/plugins \
+		-H "Authorization: Bearer $(MM_ADMIN_TOKEN)" \
+		-F "plugin=@$(BUNDLE_FILE)" \
+		-F "force=true"
 
-help: ## help: prints this help message
+## help: prints this help message
+help:
 	@echo "Usage:"
-	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' |  sed -e 's/^/ /'
+	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'

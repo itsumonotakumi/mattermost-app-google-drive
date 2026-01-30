@@ -59,3 +59,7 @@ Thumbs.db
 #Environment variables
 .env
 .eslintcache
+
+# Go
+server/dist/
+*.tar.gz

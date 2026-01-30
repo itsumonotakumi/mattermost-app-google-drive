@@ -1,0 +1,57 @@
+{
+    "id": "com.mattermost.google-drive",
+    "name": "Google Drive",
+    "description": "Google Drive plugin for Mattermost - Create, share files in Google Drive and receive notifications for shared files and comments on files",
+    "homepage_url": "https://github.com/mattermost/mattermost-app-google-drive",
+    "support_url": "https://github.com/mattermost/mattermost-app-google-drive/issues",
+    "icon_path": "assets/icon.svg",
+    "version": "1.1.0",
+    "min_server_version": "9.0.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "linux-arm64": "server/dist/plugin-linux-arm64",
+            "darwin-amd64": "server/dist/plugin-darwin-amd64",
+            "darwin-arm64": "server/dist/plugin-darwin-arm64",
+            "windows-amd64": "server/dist/plugin-windows-amd64.exe"
+        }
+    },
+    "settings_schema": {
+        "header": "Configure the Google Drive plugin to allow users to connect their Google accounts and interact with Google Drive files.",
+        "settings": [
+            {
+                "key": "GoogleOAuthClientID",
+                "display_name": "Google OAuth Client ID",
+                "type": "text",
+                "help_text": "The Client ID from your Google Cloud Console OAuth 2.0 credentials.",
+                "placeholder": "Enter your Google OAuth Client ID",
+                "default": ""
+            },
+            {
+                "key": "GoogleOAuthClientSecret",
+                "display_name": "Google OAuth Client Secret",
+                "type": "text",
+                "help_text": "The Client Secret from your Google Cloud Console OAuth 2.0 credentials.",
+                "placeholder": "Enter your Google OAuth Client Secret",
+                "default": "",
+                "secret": true
+            },
+            {
+                "key": "EncryptionKey",
+                "display_name": "Encryption Key",
+                "type": "generated",
+                "help_text": "The AES encryption key used to encrypt stored access tokens. Regenerating this key will invalidate all existing Google account connections.",
+                "regenerate_help_text": "Regenerating this key will invalidate all existing Google account connections.",
+                "default": ""
+            },
+            {
+                "key": "ServiceAccountCredentials",
+                "display_name": "Service Account Credentials (JSON)",
+                "type": "longtext",
+                "help_text": "The JSON credentials for your Google Cloud Service Account. This is used for webhook notifications.",
+                "placeholder": "Paste your service account JSON credentials here",
+                "default": ""
+            }
+        ]
+    }
+}
