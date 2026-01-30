@@ -406,7 +406,9 @@ func (p *Plugin) handleOAuthComplete(w http.ResponseWriter, r *http.Request) {
 </html>`
 
 	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(html))
+	if _, err := w.Write([]byte(html)); err != nil {
+		p.API.LogError("Failed to write OAuth complete response", "error", err.Error())
+	}
 }
 
 func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -428,7 +430,9 @@ func (p *Plugin) getDirectChannel(userID string) string {
 
 func (p *Plugin) storeOAuthState(userID, state string) error {
 	data, _ := json.Marshal(map[string]string{"user_id": userID})
-	p.API.KVSetWithExpiry(fmt.Sprintf("oauth_state_%s", state), data, 300)
+	if appErr := p.API.KVSetWithExpiry(fmt.Sprintf("oauth_state_%s", state), data, 300); appErr != nil {
+		return errors.Wrap(appErr, "failed to store OAuth state")
+	}
 	return nil
 }
 
@@ -443,7 +447,8 @@ func (p *Plugin) validateOAuthState(state string) (string, error) {
 		return "", err
 	}
 
-	p.API.KVDelete(fmt.Sprintf("oauth_state_%s", state))
+	// Delete state after validation (ignore error as state cleanup is best-effort)
+	_ = p.API.KVDelete(fmt.Sprintf("oauth_state_%s", state))
 
 	return stateData["user_id"], nil
 }
@@ -454,7 +459,9 @@ func (p *Plugin) storeToken(userID string, token *oauth2.Token) error {
 		return err
 	}
 
-	p.API.KVSet(fmt.Sprintf("google_token_%s", userID), data)
+	if appErr := p.API.KVSet(fmt.Sprintf("google_token_%s", userID), data); appErr != nil {
+		return errors.Wrap(appErr, "failed to store token")
+	}
 	return nil
 }
 
@@ -473,8 +480,9 @@ func (p *Plugin) getTokenForUser(userID string) (*oauth2.Token, error) {
 }
 
 func (p *Plugin) disconnectUser(userID string) error {
-	p.API.KVDelete(fmt.Sprintf("google_token_%s", userID))
-	p.API.KVDelete(fmt.Sprintf("notifications_%s", userID))
+	// Delete user data (ignore errors as cleanup is best-effort)
+	_ = p.API.KVDelete(fmt.Sprintf("google_token_%s", userID))
+	_ = p.API.KVDelete(fmt.Sprintf("notifications_%s", userID))
 	return nil
 }
 
@@ -524,7 +532,9 @@ func (p *Plugin) createGoogleFile(token *oauth2.Token, fileType, title string) (
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -540,12 +550,15 @@ func (p *Plugin) createGoogleFile(token *oauth2.Token, fileType, title string) (
 }
 
 func (p *Plugin) enableNotifications(userID string) error {
-	p.API.KVSet(fmt.Sprintf("notifications_%s", userID), []byte("enabled"))
+	if appErr := p.API.KVSet(fmt.Sprintf("notifications_%s", userID), []byte("enabled")); appErr != nil {
+		return errors.Wrap(appErr, "failed to enable notifications")
+	}
 	return nil
 }
 
 func (p *Plugin) disableNotifications(userID string) error {
-	p.API.KVDelete(fmt.Sprintf("notifications_%s", userID))
+	// Ignore error as disabling is best-effort
+	_ = p.API.KVDelete(fmt.Sprintf("notifications_%s", userID))
 	return nil
 }
 
